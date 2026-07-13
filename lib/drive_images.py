@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 import tempfile
+import time
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 # 최근 실패 원인 (UI 진단용)
 _LAST_ERROR: str = ""
@@ -131,7 +133,10 @@ def _sa_info() -> dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def _drive_service():
+    """Drive API 클라이언트. httplib2를 명시해 Cloud SSL 끊김에 대비."""
+    import httplib2
     from google.oauth2 import service_account
+    from google_auth_httplib2 import AuthorizedHttp
     from googleapiclient.discovery import build
 
     info = _sa_info()
@@ -139,7 +144,45 @@ def _drive_service():
         info,
         scopes=["https://www.googleapis.com/auth/drive.readonly"],
     )
-    return build("drive", "v3", credentials=creds, cache_discovery=False)
+    http = httplib2.Http(timeout=60)
+    authed = AuthorizedHttp(creds, http=http)
+    return build("drive", "v3", http=authed, cache_discovery=False)
+
+
+_T = TypeVar("_T")
+
+
+def _is_transient_drive_error(exc: BaseException) -> bool:
+    if isinstance(exc, (ssl.SSLError, TimeoutError, ConnectionError, OSError)):
+        return True
+    name = type(exc).__name__
+    msg = str(exc)
+    if "SSL" in name or "RECORD_LAYER" in msg or "SSLError" in msg:
+        return True
+    if "Timeout" in name or "ConnectionReset" in name:
+        return True
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "reason", None)
+    if isinstance(cause, BaseException) and cause is not exc:
+        return _is_transient_drive_error(cause)
+    return False
+
+
+def _execute(request: Any, *, retries: int = 5) -> Any:
+    """Drive API 호출. SSL/일시 오류 시 클라이언트 재생성 후 재시도."""
+    last: BaseException | None = None
+    for attempt in range(retries):
+        try:
+            return request.execute(num_retries=2)
+        except Exception as exc:  # noqa: BLE001 — 재시도 분류용
+            last = exc
+            if not _is_transient_drive_error(exc):
+                raise
+            _drive_service.cache_clear()
+            if attempt + 1 >= retries:
+                break
+            time.sleep(min(8.0, 0.6 * (2**attempt)))
+    assert last is not None
+    raise last
 
 
 def _list_children(parent_id: str, name: str) -> str | None:
@@ -147,9 +190,8 @@ def _list_children(parent_id: str, name: str) -> str | None:
     service = _drive_service()
     safe = name.replace("\\", "\\\\").replace("'", "\\'")
     q = f"name = '{safe}' and '{parent_id}' in parents and trashed = false"
-    resp = (
-        service.files()
-        .list(
+    resp = _execute(
+        service.files().list(
             q=q,
             spaces="drive",
             fields="files(id, name, mimeType)",
@@ -158,13 +200,11 @@ def _list_children(parent_id: str, name: str) -> str | None:
             includeItemsFromAllDrives=True,
             corpora="allDrives",
         )
-        .execute()
     )
     files = resp.get("files") or []
     if not files:
-        resp = (
-            service.files()
-            .list(
+        resp = _execute(
+            service.files().list(
                 q=q,
                 spaces="drive",
                 fields="files(id, name, mimeType)",
@@ -173,7 +213,6 @@ def _list_children(parent_id: str, name: str) -> str | None:
                 includeItemsFromAllDrives=True,
                 corpora="user",
             )
-            .execute()
         )
         files = resp.get("files") or []
     if not files:
@@ -244,15 +283,28 @@ def _download_file(file_id: str, dest: Path) -> Path:
     import io
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    service = _drive_service()
-    request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
-    buf = io.BytesIO()
-    downloader = MediaIoBaseDownload(buf, request)
-    done = False
-    while not done:
-        _, done = downloader.next_chunk()
-    dest.write_bytes(buf.getvalue())
-    return dest
+    last: BaseException | None = None
+    for attempt in range(5):
+        try:
+            service = _drive_service()
+            request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+            buf = io.BytesIO()
+            downloader = MediaIoBaseDownload(buf, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            dest.write_bytes(buf.getvalue())
+            return dest
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            if not _is_transient_drive_error(exc):
+                raise
+            _drive_service.cache_clear()
+            if attempt + 1 >= 5:
+                break
+            time.sleep(min(8.0, 0.6 * (2**attempt)))
+    assert last is not None
+    raise last
 
 
 def resolve_image(root: Path, rel_path: str) -> Path | None:
@@ -294,9 +346,8 @@ def list_root_children(limit: int = 20) -> list[dict[str, str]]:
         raise RuntimeError("Drive secrets 미설정")
     folder_id = _secret_or_env("GDRIVE_FOLDER_ID").strip()
     service = _drive_service()
-    resp = (
-        service.files()
-        .list(
+    resp = _execute(
+        service.files().list(
             q=f"'{folder_id}' in parents and trashed = false",
             spaces="drive",
             fields="files(id, name, mimeType)",
@@ -305,13 +356,11 @@ def list_root_children(limit: int = 20) -> list[dict[str, str]]:
             includeItemsFromAllDrives=True,
             corpora="allDrives",
         )
-        .execute()
     )
     files = resp.get("files") or []
     if not files:
-        resp = (
-            service.files()
-            .list(
+        resp = _execute(
+            service.files().list(
                 q=f"'{folder_id}' in parents and trashed = false",
                 spaces="drive",
                 fields="files(id, name, mimeType)",
@@ -320,7 +369,6 @@ def list_root_children(limit: int = 20) -> list[dict[str, str]]:
                 includeItemsFromAllDrives=True,
                 corpora="user",
             )
-            .execute()
         )
         files = resp.get("files") or []
     return [

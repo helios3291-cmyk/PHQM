@@ -79,7 +79,7 @@ Cloud: 앱 설정 → Secrets
 | children에 `basic` 없음 | Drive 구조를 `PHQM_images/basic|mock|hancert/...png` 로 맞추거나, `output/images`가 루트면 그 상위가 아니라 **images(또는 basic의 부모)** ID 사용 |
 | `JSONDecodeError` / Invalid control character | Secrets에 넣은 JSON의 `private_key` 개행 문제. **다운로드한 JSON 파일을 수정 없이** 삼중따옴표 안에 그대로 붙이거나, 아래 TOML 테이블 방식 사용 |
 | `private_key` / auth 오류 | JSON 파싱은 됐으나 키 형식 오류. 키가 잘렸는지, 서비스 계정 재발급 여부 확인 |
-| 캐시 오류 | 자동으로 `/tmp` 사용. 재배포 후에도 실패하면 Secrets에 `COMPOSE_CACHE_DIR = "/tmp/phqm_drive_images"` |
+| `SSLError` / RECORD_LAYER_FAILURE | Streamlit Cloud 일시 SSL. 앱이 재시도함 — 잠시 후 **연결 테스트** 다시. 계속이면 Reboot |
 
 Streamlit Secrets 예시 A (권장 — 다운로드 JSON 통째로):
 
