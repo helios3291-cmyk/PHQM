@@ -33,18 +33,25 @@ def _set_error(msg: str) -> None:
     _LAST_ERROR = msg
 
 
-def _secret_or_env(key: str, default: str = "") -> str:
+def _secret_raw(key: str) -> Any:
+    """Streamlit secrets 또는 환경변수. 값은 str / Mapping 가능."""
     try:
         import streamlit as st
 
         if hasattr(st, "secrets") and key in st.secrets:
-            val = st.secrets[key]
-            if isinstance(val, dict):
-                return json.dumps(val, ensure_ascii=False)
-            return str(val)
+            return st.secrets[key]
     except Exception:
         pass
-    return os.environ.get(key, default)
+    return os.environ.get(key, "")
+
+
+def _secret_or_env(key: str, default: str = "") -> str:
+    val = _secret_raw(key)
+    if val is None or val == "":
+        return default
+    if isinstance(val, dict):
+        return json.dumps(dict(val), ensure_ascii=False)
+    return str(val)
 
 
 def drive_configured() -> bool:
@@ -82,21 +89,40 @@ def _normalize_rel(rel_path: str) -> str:
 
 
 def _sa_info() -> dict[str, Any]:
-    raw = _secret_or_env("GDRIVE_SERVICE_ACCOUNT_JSON").strip()
-    if not raw:
+    """서비스 계정 정보. Secrets에 문자열·TOML 테이블 모두 허용.
+
+    Cloud에서 private_key에 실제 개행이 들어가면 JSONDecodeError(Invalid control
+    character)가 나므로 strict=False + 키 정규화를 한다.
+    """
+    raw = _secret_raw("GDRIVE_SERVICE_ACCOUNT_JSON")
+    if raw is None or raw == "":
         raise RuntimeError("GDRIVE_SERVICE_ACCOUNT_JSON 이 없습니다.")
-    raw = raw.lstrip("\ufeff").strip()
-    if raw.startswith("{"):
-        info = json.loads(raw)
+
+    info: dict[str, Any]
+    if isinstance(raw, dict):
+        info = {str(k): v for k, v in dict(raw).items()}
     else:
-        p = Path(raw)
-        if p.is_file():
-            info = json.loads(p.read_text(encoding="utf-8"))
+        text = str(raw).lstrip("\ufeff").strip()
+        if text.startswith("{"):
+            # Secrets 붙여넣기 시 private_key 안 실제 개행 허용
+            try:
+                info = json.loads(text, strict=False)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(
+                    "GDRIVE_SERVICE_ACCOUNT_JSON 파싱 실패. "
+                    "다운로드한 JSON을 그대로 붙이거나, TOML 테이블로 넣으세요. "
+                    f"({exc})"
+                ) from exc
         else:
-            raise RuntimeError(
-                "GDRIVE_SERVICE_ACCOUNT_JSON 이 JSON 객체가 아닙니다. "
-                "Streamlit Secrets에 JSON 전체(또는 TOML 테이블)로 넣으세요."
-            )
+            p = Path(text)
+            if p.is_file():
+                info = json.loads(p.read_text(encoding="utf-8"), strict=False)
+            else:
+                raise RuntimeError(
+                    "GDRIVE_SERVICE_ACCOUNT_JSON 이 JSON 객체가 아닙니다. "
+                    "Streamlit Secrets에 JSON 전체(또는 TOML 테이블)로 넣으세요."
+                )
+
     pk = info.get("private_key")
     if isinstance(pk, str) and "\\n" in pk:
         info["private_key"] = pk.replace("\\n", "\n")

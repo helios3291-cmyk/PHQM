@@ -77,17 +77,37 @@ Cloud: 앱 설정 → Secrets
 | `configured: false` | Cloud Secrets에 `GDRIVE_FOLDER_ID`, `GDRIVE_SERVICE_ACCOUNT_JSON` 등록 후 재부팅 |
 | `root_children` 비어 있음 | 폴더를 서비스 계정 이메일에 **뷰어 공유**. 폴더 ID가 맞는지 URL로 재확인 |
 | children에 `basic` 없음 | Drive 구조를 `PHQM_images/basic|mock|hancert/...png` 로 맞추거나, `output/images`가 루트면 그 상위가 아니라 **images(또는 basic의 부모)** ID 사용 |
-| `private_key` / auth 오류 | JSON을 Secrets에 **통째로** 붙여넣기. TOML 테이블로 넣을 때는 `private_key` 개행 유지 |
+| `JSONDecodeError` / Invalid control character | Secrets에 넣은 JSON의 `private_key` 개행 문제. **다운로드한 JSON 파일을 수정 없이** 삼중따옴표 안에 그대로 붙이거나, 아래 TOML 테이블 방식 사용 |
+| `private_key` / auth 오류 | JSON 파싱은 됐으나 키 형식 오류. 키가 잘렸는지, 서비스 계정 재발급 여부 확인 |
 | 캐시 오류 | 자동으로 `/tmp` 사용. 재배포 후에도 실패하면 Secrets에 `COMPOSE_CACHE_DIR = "/tmp/phqm_drive_images"` |
 
-Streamlit Secrets 예시 (권장 — JSON 문자열):
+Streamlit Secrets 예시 A (권장 — 다운로드 JSON 통째로):
 
 ```toml
 COMPOSE_APP_PASSWORD = "...."
 GDRIVE_FOLDER_ID = "1abc...."
 GDRIVE_SERVICE_ACCOUNT_JSON = """
-{ ... 서비스계정 JSON 전체 ... }
+{다운로드한 service-account.json 내용 그대로 — 직접 개행 편집하지 마세요}
 """
+```
+
+예시 B (TOML 테이블 — `private_key` 개행을 자연스럽게 유지):
+
+```toml
+GDRIVE_FOLDER_ID = "1abc...."
+
+[GDRIVE_SERVICE_ACCOUNT_JSON]
+type = "service_account"
+project_id = "your-project"
+private_key_id = "...."
+private_key = """
+-----BEGIN PRIVATE KEY-----
+(PEM 줄 그대로)
+-----END PRIVATE KEY-----
+"""
+client_email = "....iam.gserviceaccount.com"
+client_id = "...."
+token_uri = "https://oauth2.googleapis.com/token"
 ```
 
 ## 주의
