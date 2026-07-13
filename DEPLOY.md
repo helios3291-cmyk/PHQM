@@ -18,7 +18,7 @@ streamlit run compose_app.py
 
 1. 이 저장소를 [Streamlit Cloud](https://share.streamlit.io/)에 연결
 2. Main file: `compose_app.py`
-3. Python requirements: `requirements-compose.txt`
+3. Python requirements: `requirements.txt` (또는 `requirements-compose.txt` — 둘 다 Google Drive 패키지 포함)
 4. **Secrets**에 `.streamlit/secrets.toml.example` 내용을 채워 등록
 
 ## Google Drive 연동 (필수 절차)
