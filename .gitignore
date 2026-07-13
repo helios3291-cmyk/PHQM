@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.DS_Store
+Thumbs.db
+*.log
+
+# 대용량·저작권 데이터 (Google Drive 사용)
+output/images/
+output/work/
+output/composed/
+output/pdf/
+input/pdf/
+input/classification/
+
+# 시크릿·캐시
+.streamlit/secrets.toml
+**/credentials*.json
+**/*service-account*.json
+.cache/
+
+# 로컬 분석 산출물
+debug-*.log
+*.png.tmp
