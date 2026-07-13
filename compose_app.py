@@ -17,10 +17,14 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-ROOT = Path(os.environ.get("COMPOSE_DATA_ROOT", Path(__file__).resolve().parent))
-SCRIPTS = Path(__file__).resolve().parent / ".cursor" / "skills" / "history-exam-analyst" / "scripts"
-if str(SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS))
+_APP_DIR = Path(__file__).resolve().parent
+ROOT = Path(os.environ.get("COMPOSE_DATA_ROOT", _APP_DIR))
+# lib/ 우선 (Streamlit Cloud에서 .cursor 경로보다 안전), 이어서 skills scripts
+_SCRIPTS = _APP_DIR / ".cursor" / "skills" / "history-exam-analyst" / "scripts"
+_LIB = _APP_DIR / "lib"
+for _p in (_LIB, _SCRIPTS):
+    if _p.is_dir() and str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from compose_pdf import compose_to_files  # noqa: E402
 from compose_query import (  # noqa: E402
@@ -31,13 +35,22 @@ from compose_query import (  # noqa: E402
     load_all_questions,
     question_uid,
 )
-from drive_images import (  # noqa: E402
-    diagnose,
-    drive_configured,
-    get_last_error,
-    resolve_image,
-)
 from exam_profiles import PROFILE_IDS  # noqa: E402
+
+try:
+    from drive_images import (  # noqa: E402
+        diagnose,
+        drive_configured,
+        get_last_error,
+        resolve_image,
+    )
+except ImportError as _drive_imp_err:  # pragma: no cover
+    raise ImportError(
+        "drive_images import 실패. lib/drive_images.py 가 저장소에 있는지, "
+        "Streamlit requirements가 requirements-compose.txt 인지 확인하세요. "
+        f"paths={{lib:{_LIB.exists()}, scripts:{_SCRIPTS.exists()}}} "
+        f"detail={_drive_imp_err}"
+    ) from _drive_imp_err
 
 
 st.set_page_config(page_title="기출 조합 시험지", layout="wide")
