@@ -31,7 +31,12 @@ from compose_query import (  # noqa: E402
     load_all_questions,
     question_uid,
 )
-from drive_images import drive_configured, resolve_image  # noqa: E402
+from drive_images import (  # noqa: E402
+    diagnose,
+    drive_configured,
+    get_last_error,
+    resolve_image,
+)
 from exam_profiles import PROFILE_IDS  # noqa: E402
 
 
@@ -119,7 +124,8 @@ def _preview_image(rel: str):
     if path and path.is_file():
         st.image(str(path), use_container_width=True)
     else:
-        st.caption("이미지 없음" + (" (Drive 확인)" if drive_configured() else ""))
+        err = get_last_error()
+        st.caption("이미지 없음" + (f" — {err}" if err else " (Drive 확인)"))
 
 
 def main() -> None:
@@ -133,6 +139,10 @@ def main() -> None:
         st.caption("Google Drive 이미지 연동: 사용 중 (온디맨드 캐시)")
     else:
         st.caption("이미지: 로컬 `output/images` (Drive secrets 미설정)")
+        st.warning(
+            "Streamlit Cloud에서는 보통 Drive secrets가 필요합니다. "
+            "`GDRIVE_FOLDER_ID` / `GDRIVE_SERVICE_ACCOUNT_JSON`을 설정하세요."
+        )
 
     all_df = _cached_all()
     if all_df.empty:
@@ -176,6 +186,31 @@ def main() -> None:
             require_image=require_image,
         )
         st.metric("후보 문항", len(filtered))
+
+        st.divider()
+        st.subheader("Drive 진단")
+        sample = ""
+        if not filtered.empty:
+            sample = str(filtered.iloc[0].get("이미지경로", "") or "")
+        elif not all_df.empty:
+            sample = str(all_df.iloc[0].get("이미지경로", "") or "")
+        if st.button("연결 테스트", use_container_width=True):
+            result = diagnose(ROOT, sample_rel=sample)
+            st.json(result)
+            kids = result.get("root_children") or []
+            names = {k.get("name") for k in kids}
+            if result.get("configured") and not (
+                names & {"basic", "mock", "hancert", "output", "images"}
+            ):
+                st.error(
+                    "폴더 직하위에 basic/mock/hancert 가 없습니다. "
+                    "GDRIVE_FOLDER_ID가 images 루트를 가리키는지, "
+                    "서비스 계정에 폴더가 공유됐는지 확인하세요."
+                )
+            elif result.get("sample_resolved"):
+                st.success(f"샘플 resolve OK: {result['sample_resolved']}")
+            elif result.get("error"):
+                st.error(result["error"])
 
     col_cand, col_basket = st.columns([1.35, 1], gap="large")
 

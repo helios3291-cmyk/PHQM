@@ -6,8 +6,8 @@
 
 Secrets / 환경변수:
   GDRIVE_FOLDER_ID              — images 루트 폴더 ID
-  GDRIVE_SERVICE_ACCOUNT_JSON   — 서비스 계정 JSON 문자열
-  COMPOSE_CACHE_DIR             — 캐시 디렉터리 (기본: <root>/.cache/drive_images)
+  GDRIVE_SERVICE_ACCOUNT_JSON   — 서비스 계정 JSON 문자열 또는 TOML 테이블
+  COMPOSE_CACHE_DIR             — 캐시 디렉터리 (Cloud 기본: /tmp/phqm_drive_images)
   COMPOSE_DATA_ROOT             — 데이터 루트 (compose_app에서 사용)
 """
 
@@ -15,9 +15,22 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+# 최근 실패 원인 (UI 진단용)
+_LAST_ERROR: str = ""
+
+
+def get_last_error() -> str:
+    return _LAST_ERROR
+
+
+def _set_error(msg: str) -> None:
+    global _LAST_ERROR
+    _LAST_ERROR = msg
 
 
 def _secret_or_env(key: str, default: str = "") -> str:
@@ -41,13 +54,28 @@ def drive_configured() -> bool:
 
 
 def cache_dir(root: Path) -> Path:
+    """Streamlit Cloud는 앱 루트가 읽기전용 → /tmp 우선."""
     override = _secret_or_env("COMPOSE_CACHE_DIR").strip()
+    candidates: list[Path] = []
     if override:
-        path = Path(override)
-    else:
-        path = root / ".cache" / "drive_images"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+        candidates.append(Path(override))
+    # Cloud / 컨테이너
+    candidates.append(Path(tempfile.gettempdir()) / "phqm_drive_images")
+    candidates.append(Path("/tmp") / "phqm_drive_images")
+    candidates.append(root / ".cache" / "drive_images")
+
+    last_exc: Exception | None = None
+    for path in candidates:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            probe = path / ".write_test"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            return path
+        except Exception as exc:
+            last_exc = exc
+            continue
+    raise RuntimeError(f"캐시 디렉터리를 만들 수 없습니다: {last_exc}")
 
 
 def _normalize_rel(rel_path: str) -> str:
@@ -58,13 +86,26 @@ def _sa_info() -> dict[str, Any]:
     raw = _secret_or_env("GDRIVE_SERVICE_ACCOUNT_JSON").strip()
     if not raw:
         raise RuntimeError("GDRIVE_SERVICE_ACCOUNT_JSON 이 없습니다.")
+    # BOM / 앞뒤 공백 제거
+    raw = raw.lstrip("\ufeff").strip()
     if raw.startswith("{"):
-        return json.loads(raw)
-    # 파일 경로로도 허용
-    p = Path(raw)
-    if p.is_file():
-        return json.loads(p.read_text(encoding="utf-8"))
-    raise RuntimeError("GDRIVE_SERVICE_ACCOUNT_JSON 형식이 올바르지 않습니다.")
+        info = json.loads(raw)
+    else:
+        p = Path(raw)
+        if p.is_file():
+            info = json.loads(p.read_text(encoding="utf-8"))
+        else:
+            raise RuntimeError(
+                "GDRIVE_SERVICE_ACCOUNT_JSON 이 JSON 객체가 아닙니다. "
+                "Streamlit Secrets에 JSON 전체(또는 TOML 테이블)로 넣으세요."
+            )
+    # private_key 의 이스케이프된 개행 복원
+    pk = info.get("private_key")
+    if isinstance(pk, str) and "\\n" in pk and "\n" not in pk.replace("\\n", ""):
+        info["private_key"] = pk.replace("\\n", "\n")
+    elif isinstance(pk, str) and "-----BEGIN" in pk and "\\n" in pk:
+        info["private_key"] = pk.replace("\\n", "\n")
+    return info
 
 
 @lru_cache(maxsize=1)
@@ -83,11 +124,8 @@ def _drive_service():
 def _list_children(parent_id: str, name: str) -> str | None:
     """부모 폴더에서 이름 일치 파일/폴더 ID (trashed 제외)."""
     service = _drive_service()
-    # Drive API: name = 'x' and 'parent' in parents
     safe = name.replace("\\", "\\\\").replace("'", "\\'")
-    q = (
-        f"name = '{safe}' and '{parent_id}' in parents and trashed = false"
-    )
+    q = f"name = '{safe}' and '{parent_id}' in parents and trashed = false"
     resp = (
         service.files()
         .list(
@@ -97,30 +135,56 @@ def _list_children(parent_id: str, name: str) -> str | None:
             pageSize=10,
             supportsAllDrives=True,
             includeItemsFromAllDrives=True,
+            corpora="allDrives",
         )
         .execute()
     )
     files = resp.get("files") or []
     if not files:
+        # corpora=user 로 한 번 더 (공유 내 Drive 폴더)
+        resp = (
+            service.files()
+            .list(
+                q=q,
+                spaces="drive",
+                fields="files(id, name, mimeType)",
+                pageSize=10,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                corpora="user",
+            )
+            .execute()
+        )
+        files = resp.get("files") or []
+    if not files:
         return None
     return files[0]["id"]
 
 
-@lru_cache(maxsize=512)
-def _resolve_drive_file_id(rel_path: str) -> str | None:
-    """output/images/basic/foo.png → Drive file id (images 루트 기준)."""
-    folder_id = _secret_or_env("GDRIVE_FOLDER_ID").strip()
-    if not folder_id:
-        return None
+def _path_variants(rel_path: str) -> list[str]:
+    """Drive 폴더 구조 차이(루트=images vs 루트에 output/images)를 흡수."""
     rel = _normalize_rel(rel_path)
-    # CSV 경로는 output/images/... 형태. Drive 루트가 images 이면 접두 제거
+    variants: list[str] = []
+
+    def add(p: str) -> None:
+        p = _normalize_rel(p)
+        if p and p not in variants:
+            variants.append(p)
+
+    add(rel)
+    stripped = rel
     for prefix in ("output/images/", "images/"):
-        if rel.startswith(prefix):
-            rel = rel[len(prefix) :]
+        if stripped.startswith(prefix):
+            stripped = stripped[len(prefix) :]
             break
-    parts = [p for p in rel.split("/") if p]
-    if not parts:
-        return None
+    add(stripped)
+    add("output/images/" + stripped)
+    add("images/" + stripped)
+    # 파일명만으로도 시도하지 않음 (동명 충돌)
+    return variants
+
+
+def _walk_to_file_id(folder_id: str, parts: list[str]) -> str | None:
     parent = folder_id
     for i, part in enumerate(parts):
         found = _list_children(parent, part)
@@ -129,6 +193,30 @@ def _resolve_drive_file_id(rel_path: str) -> str | None:
         if i == len(parts) - 1:
             return found
         parent = found
+    return None
+
+
+@lru_cache(maxsize=512)
+def _resolve_drive_file_id(rel_path: str) -> str | None:
+    """output/images/basic/foo.png → Drive file id."""
+    folder_id = _secret_or_env("GDRIVE_FOLDER_ID").strip()
+    if not folder_id:
+        _set_error("GDRIVE_FOLDER_ID 가 비어 있습니다.")
+        return None
+
+    for variant in _path_variants(rel_path):
+        parts = [p for p in variant.split("/") if p]
+        if not parts:
+            continue
+        found = _walk_to_file_id(folder_id, parts)
+        if found:
+            return found
+
+    _set_error(
+        f"Drive에서 파일을 찾지 못함: {rel_path} "
+        f"(시도 경로: {', '.join(_path_variants(rel_path))}). "
+        "폴더 공유·폴더 ID·basic/mock/hancert 구조 확인."
+    )
     return None
 
 
@@ -158,10 +246,17 @@ def resolve_image(root: Path, rel_path: str) -> Path | None:
         return local
 
     if not drive_configured():
+        _set_error("Drive secrets(GDRIVE_FOLDER_ID / GDRIVE_SERVICE_ACCOUNT_JSON) 미설정")
         return None
 
-    cached = cache_dir(root) / rel
-    if cached.is_file():
+    try:
+        cdir = cache_dir(root)
+    except Exception as exc:
+        _set_error(f"캐시 디렉터리 오류: {exc}")
+        return None
+
+    cached = cdir / rel
+    if cached.is_file() and cached.stat().st_size > 0:
         return cached
 
     try:
@@ -169,8 +264,88 @@ def resolve_image(root: Path, rel_path: str) -> Path | None:
         if not file_id:
             return None
         return _download_file(file_id, cached)
-    except Exception:
+    except Exception as exc:
+        _set_error(f"Drive 다운로드 실패 ({rel}): {type(exc).__name__}: {exc}")
         return None
+
+
+def list_root_children(limit: int = 20) -> list[dict[str, str]]:
+    """진단용: GDRIVE_FOLDER_ID 직하위 항목."""
+    if not drive_configured():
+        raise RuntimeError("Drive secrets 미설정")
+    folder_id = _secret_or_env("GDRIVE_FOLDER_ID").strip()
+    service = _drive_service()
+    resp = (
+        service.files()
+        .list(
+            q=f"'{folder_id}' in parents and trashed = false",
+            spaces="drive",
+            fields="files(id, name, mimeType)",
+            pageSize=limit,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+            corpora="allDrives",
+        )
+        .execute()
+    )
+    files = resp.get("files") or []
+    if not files:
+        resp = (
+            service.files()
+            .list(
+                q=f"'{folder_id}' in parents and trashed = false",
+                spaces="drive",
+                fields="files(id, name, mimeType)",
+                pageSize=limit,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                corpora="user",
+            )
+            .execute()
+        )
+        files = resp.get("files") or []
+    return [
+        {
+            "name": f.get("name", ""),
+            "mimeType": f.get("mimeType", ""),
+            "id": f.get("id", ""),
+        }
+        for f in files
+    ]
+
+
+def diagnose(root: Path, sample_rel: str = "") -> dict[str, Any]:
+    """UI용 진단 결과."""
+    out: dict[str, Any] = {
+        "configured": drive_configured(),
+        "folder_id_set": bool(_secret_or_env("GDRIVE_FOLDER_ID").strip()),
+        "sa_json_set": bool(_secret_or_env("GDRIVE_SERVICE_ACCOUNT_JSON").strip()),
+        "cache_dir": "",
+        "root_children": [],
+        "sample_rel": sample_rel,
+        "sample_resolved": "",
+        "error": "",
+    }
+    try:
+        out["cache_dir"] = str(cache_dir(root))
+    except Exception as exc:
+        out["error"] = f"cache: {exc}"
+        return out
+    if not out["configured"]:
+        out["error"] = "secrets 미설정"
+        return out
+    try:
+        out["root_children"] = list_root_children()
+        if sample_rel:
+            # 캐시된 실패/경로 무효화
+            _resolve_drive_file_id.cache_clear()
+            path = resolve_image(root, sample_rel)
+            out["sample_resolved"] = str(path) if path else ""
+            if not path:
+                out["error"] = get_last_error() or "샘플 이미지 resolve 실패"
+    except Exception as exc:
+        out["error"] = f"{type(exc).__name__}: {exc}"
+    return out
 
 
 def image_available(root: Path, rel_path: str, *, probe_drive: bool = False) -> bool:
@@ -180,9 +355,11 @@ def image_available(root: Path, rel_path: str, *, probe_drive: bool = False) -> 
         return False
     if (root / rel).is_file():
         return True
-    if (cache_dir(root) / rel).is_file():
-        return True
+    try:
+        if (cache_dir(root) / rel).is_file():
+            return True
+    except Exception:
+        pass
     if not probe_drive:
-        # Drive 설정 시 CSV 경로가 있으면 '있을 수 있음'으로 표시 → 필터에서 통과
         return drive_configured() and bool(rel)
     return resolve_image(root, rel) is not None

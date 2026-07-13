@@ -64,8 +64,31 @@ Cloud: 앱 설정 → Secrets
 ### D. 동작 방식
 
 - 목록/필터: CSV만 사용 (Drive 전체 스캔 없음)
-- 미리보기·PDF 생성: 필요한 PNG만 Drive에서 받아 `.cache/drive_images` 또는 `/tmp`에 캐시
+- 미리보기·PDF 생성: 필요한 PNG만 Drive에서 받아 **`/tmp/phqm_drive_images`** 에 캐시
+  (Streamlit Cloud 앱 폴더는 읽기 전용이라 프로젝트 `.cache`는 쓰지 않음)
 - 로컬에 `output/images`가 있으면 **로컬 우선** (Drive 호출 없음)
+
+### E. 이미지가 안 보일 때 체크리스트
+
+사이드바 **Drive 진단 → 연결 테스트**를 누르면 원인 JSON이 표시됩니다.
+
+| 증상 | 조치 |
+|------|------|
+| `configured: false` | Cloud Secrets에 `GDRIVE_FOLDER_ID`, `GDRIVE_SERVICE_ACCOUNT_JSON` 등록 후 재부팅 |
+| `root_children` 비어 있음 | 폴더를 서비스 계정 이메일에 **뷰어 공유**. 폴더 ID가 맞는지 URL로 재확인 |
+| children에 `basic` 없음 | Drive 구조를 `PHQM_images/basic|mock|hancert/...png` 로 맞추거나, `output/images`가 루트면 그 상위가 아니라 **images(또는 basic의 부모)** ID 사용 |
+| `private_key` / auth 오류 | JSON을 Secrets에 **통째로** 붙여넣기. TOML 테이블로 넣을 때는 `private_key` 개행 유지 |
+| 캐시 오류 | 자동으로 `/tmp` 사용. 재배포 후에도 실패하면 Secrets에 `COMPOSE_CACHE_DIR = "/tmp/phqm_drive_images"` |
+
+Streamlit Secrets 예시 (권장 — JSON 문자열):
+
+```toml
+COMPOSE_APP_PASSWORD = "...."
+GDRIVE_FOLDER_ID = "1abc...."
+GDRIVE_SERVICE_ACCOUNT_JSON = """
+{ ... 서비스계정 JSON 전체 ... }
+"""
+```
 
 ## 주의
 
