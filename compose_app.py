@@ -26,7 +26,7 @@ for _p in (_LIB, _SCRIPTS):
     if _p.is_dir() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from compose_pdf import compose_to_files  # noqa: E402
+from compose_pdf import compose_to_files, find_cjk_font_path  # noqa: E402
 from compose_query import (  # noqa: E402
     ERAS,
     PROFILE_LABELS,
@@ -132,10 +132,11 @@ def _move_basket(uid: str, delta: int) -> None:
     basket[i], basket[j] = basket[j], basket[i]
 
 
-def _preview_image(rel: str):
+def _preview_image(rel: str, *, width: int = 180) -> None:
+    """Drive 다운로드는 호출 시에만 발생. 미리보기는 썸네일 폭으로 표시."""
     path = resolve_image(ROOT, rel)
     if path and path.is_file():
-        st.image(str(path), use_container_width=True)
+        st.image(str(path), width=width)
     else:
         err = get_last_error()
         st.caption("이미지 없음" + (f" — {err}" if err else " (Drive 확인)"))
@@ -187,7 +188,13 @@ def main() -> None:
                 dict.fromkeys(achievement_codes + [achievement_prefix.strip()])
             )
 
-        keyword = st.text_input("키워드 (쉼표=OR)", value="", placeholder="예: 대동법, 임진왜란")
+        keyword = st.text_input(
+            "키워드 (쉼표=OR)",
+            value="",
+            placeholder="예: 대동법, 임진왜란",
+            help="자료핵심요소 · 정답핵심요소 모두에서 부분 일치(OR) 검색합니다.",
+        )
+        st.caption("키워드 → 자료핵심요소 · 정답핵심요소")
         require_image = st.checkbox("이미지 있는 문항만", value=True)
 
         filtered = filter_questions(
@@ -241,8 +248,9 @@ def main() -> None:
                     "표시 개수",
                     min_value=1,
                     max_value=min(100, n_total),
-                    value=min(30, n_total),
+                    value=min(10, n_total),
                 )
+            st.caption("미리보기는 문항별 토글을 켤 때만 Drive에서 받습니다.")
             view = filtered.head(show_n)
             c1, c2 = st.columns(2)
             with c1:
@@ -260,21 +268,23 @@ def main() -> None:
             for _, row in view.iterrows():
                 uid = str(row["uid"])
                 already = uid in in_basket
+                source_key = str(row.get("자료핵심요소", "") or "")
+                answer_key = str(row.get("정답핵심요소", "") or "")
                 with st.container(border=True):
-                    left, right = st.columns([1, 3])
-                    with left:
-                        _preview_image(str(row["이미지경로"]))
-                    with right:
-                        st.markdown(
-                            f"**{row['프로파일라벨']}** · {row['연도']} · {row['문형']} #{row['문항번호']}  \n"
-                            f"`{row['성취기준_코드']}` · {row['시대']} · {row['문제형식']}  \n"
-                            f"자료: {row['자료핵심요소'][:80]}"
-                        )
-                        if already:
-                            st.caption("바구니에 있음")
-                        elif st.button("추가", key=f"add_{uid}", use_container_width=True):
-                            _add_to_basket([row.to_dict()])
-                            st.rerun()
+                    st.markdown(
+                        f"**{row['프로파일라벨']}** · {row['연도']} · {row['문형']} #{row['문항번호']}  \n"
+                        f"`{row['성취기준_코드']}` · {row['시대']} · {row['문제형식']}  \n"
+                        f"자료: {source_key[:80]}  \n"
+                        f"정답: {answer_key[:80]}"
+                    )
+                    show_prev = st.toggle("미리보기", key=f"prev_{uid}", value=False)
+                    if show_prev:
+                        _preview_image(str(row["이미지경로"]), width=180)
+                    if already:
+                        st.caption("바구니에 있음")
+                    elif st.button("추가", key=f"add_{uid}", use_container_width=True):
+                        _add_to_basket([row.to_dict()])
+                        st.rerun()
 
     with col_basket:
         st.subheader(f"바구니 ({len(st.session_state.basket)}문항)")
@@ -305,7 +315,13 @@ def main() -> None:
                 )
                 st.session_state.last_exam_pdf = str(exam_pdf)
                 st.session_state.last_answer_pdf = str(answer_pdf)
-            st.success("생성 완료")
+            if find_cjk_font_path():
+                st.success("생성 완료")
+            else:
+                st.warning(
+                    "PDF는 만들었지만 한글 폰트(assets/fonts/NanumGothic.ttf)를 찾지 못했습니다. "
+                    "제목·라벨이 깨질 수 있습니다. 저장소에 폰트가 포함됐는지 확인하세요."
+                )
 
         if st.session_state.last_exam_pdf and Path(st.session_state.last_exam_pdf).is_file():
             exam_p = Path(st.session_state.last_exam_pdf)
@@ -338,7 +354,8 @@ def main() -> None:
                     f"**{row.get('프로파일라벨', '')}** {row.get('연도', '')} "
                     f"{row.get('문형', '')} #{row.get('문항번호', '')} · {row.get('시대', '')}"
                 )
-                st.caption(str(row.get("자료핵심요소", ""))[:100])
+                st.caption(f"자료: {str(row.get('자료핵심요소', '') or '')[:80]}")
+                st.caption(f"정답: {str(row.get('정답핵심요소', '') or '')[:80]}")
                 a, b, c = st.columns(3)
                 with a:
                     if st.button("▲", key=f"up_{uid}"):
