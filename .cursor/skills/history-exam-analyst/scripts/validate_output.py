@@ -97,6 +97,8 @@ def validate_profile(root: Path, profile_id: str, *, strict: bool = False) -> li
             if pd.isna(value) or str(value).strip() == "":
                 if profile_id == "hancert" and col == "성취기준_코드":
                     continue
+                if col == "정답":
+                    continue
                 errors.append(f"[{profile_id}] 행 {row_num}: '{col}' 값이 비어 있음")
 
         era = str(row.get("시대", "")).strip()
@@ -113,6 +115,23 @@ def validate_profile(root: Path, profile_id: str, *, strict: bool = False) -> li
         year = str(row.get("연도", "")).strip()
         exam_type = str(row.get("문형", "")).strip()
         pdf_name = str(row.get("원본PDF", "")).strip()
+
+        answer = str(row.get("정답", "")).strip()
+        if answer.lower() in {"", "nan", "none"}:
+            answer = ""
+        if answer and answer not in {"1", "2", "3", "4", "5"}:
+            # pandas float 잔존값 (2.0) 허용·정규화 검사
+            try:
+                n = int(float(answer))
+                if 1 <= n <= 5:
+                    answer = str(n)
+                else:
+                    errors.append(f"[{profile_id}] 행 {row_num}: 정답은 1~5여야 함 — {answer}")
+            except ValueError:
+                errors.append(f"[{profile_id}] 행 {row_num}: 정답은 1~5여야 함 — {answer}")
+            else:
+                if answer not in {"1", "2", "3", "4", "5"}:
+                    errors.append(f"[{profile_id}] 행 {row_num}: 정답은 1~5여야 함 — {answer}")
 
         if year:
             if is_mock_or_suneung(exam_type, pdf_name):

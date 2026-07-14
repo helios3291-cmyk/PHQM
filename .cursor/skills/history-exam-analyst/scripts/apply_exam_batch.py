@@ -21,7 +21,7 @@ from exam_profiles import (
     image_rel_path,
 )
 from index_classification import classification_path_for_exam, parse_classification_pdf
-from normalize_class_code import normalize_class_code
+from normalize_class_code import answer_label_to_number, normalize_class_code
 
 
 def project_root() -> Path:
@@ -68,13 +68,24 @@ def build_meta(
         return None
 
     achievement_code = ai_meta.get("achievement_code", "")
+    answer = str(ai_meta.get("answer", "") or "").strip()
 
     if cls_entry:
         achievement_code = cls_entry.get("achievement_code") or achievement_code
+        cls_answer = str(cls_entry.get("answer", "") or "").strip()
+        if not cls_answer and cls_entry.get("answer_label"):
+            cls_answer = answer_label_to_number(str(cls_entry["answer_label"]))
+        if cls_answer:
+            answer = cls_answer
 
     normalized = normalize_class_code(achievement_code) if achievement_code else None
     if normalized:
         achievement_code = normalized
+
+    if answer:
+        answer = answer_label_to_number(answer) or answer
+        if answer not in {"1", "2", "3", "4", "5"}:
+            answer = ""
 
     return {
         "achievement_code": achievement_code,
@@ -82,6 +93,7 @@ def build_meta(
         "problem_format": ai_meta.get("problem_format", ""),
         "sub_format": ai_meta.get("sub_format", ""),
         "source_key": ai_meta.get("source_key", ""),
+        "answer": answer,
         "answer_key": ai_meta.get("answer_key", ""),
         "from_classification": bool(cls_entry),
     }
@@ -261,6 +273,7 @@ def main() -> int:
                     "문제형식": meta["problem_format"],
                     "세부형식": meta["sub_format"],
                     "자료핵심요소": meta["source_key"],
+                    "정답": meta["answer"],
                     "정답핵심요소": meta["answer_key"],
                     "이미지경로": img_rel,
                     "원본PDF": q["source_pdf"],

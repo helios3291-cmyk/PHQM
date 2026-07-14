@@ -28,6 +28,7 @@ class ComposeItem:
     new_number: int
     era: str = ""
     achievement_code: str = ""
+    answer: str = ""
     answer_key: str = ""
     source_year: str = ""
     source_exam_type: str = ""
@@ -46,6 +47,17 @@ def _item_source_bracket(item: ComposeItem) -> str:
     mid = " · ".join(parts) if parts else "출처미상"
     num = str(item.source_number).strip() or "?"
     return f"[{mid} #{num}]"
+
+
+def _answer_display(answer: str) -> str:
+    """CSV 정답(1~5) → PDF 표시. NanumGothic에 원문자 글리프가 없어 (n)만 사용."""
+    key = str(answer or "").strip()
+    mapping = {"①": "1", "②": "2", "③": "3", "④": "4", "⑤": "5"}
+    if key in mapping:
+        key = mapping[key]
+    if key in {"1", "2", "3", "4", "5"}:
+        return f"({key})"
+    return "—"
 
 
 def _item_label(item: ComposeItem) -> str:
@@ -284,17 +296,29 @@ def build_answer_pdf(
 
     for item in items:
         source = _item_source_bracket(item)
-        ach = f" · {item.achievement_code}" if item.achievement_code else ""
-        line1 = f"{item.new_number}.  {source}{ach}"
-        line2 = f"    [{item.era}] {item.answer_key}"
-        if y + line_h * 2 > _content_bottom():
+        label = _answer_display(item.answer)
+        line1 = f"{item.new_number}.  {label}    {source}"
+        era = str(item.era).strip()
+        key = str(item.answer_key).strip()
+        if era and key:
+            line2 = f"    [{era}] {key}"
+        elif key:
+            line2 = f"    {key}"
+        elif era:
+            line2 = f"    [{era}]"
+        else:
+            line2 = ""
+        if y + line_h * (2 if line2 else 1) > _content_bottom():
             page = new_ans_page()
             y = _content_top() + 8
         rect1 = fitz.Rect(MARGIN, y, PAGE_W - MARGIN, y + line_h)
-        rect2 = fitz.Rect(MARGIN, y + line_h, PAGE_W - MARGIN, y + line_h * 2)
         _insert_cjk(page, rect1, line1, fontsize)
-        _insert_cjk(page, rect2, line2, fontsize - 1)
-        y += line_h * 2 + 2
+        if line2:
+            rect2 = fitz.Rect(MARGIN, y + line_h, PAGE_W - MARGIN, y + line_h * 2)
+            _insert_cjk(page, rect2, line2, fontsize - 1)
+            y += line_h * 2 + 2
+        else:
+            y += line_h + 2
 
     total = doc.page_count
     for i in range(total):
@@ -353,24 +377,29 @@ def _find_cjk_font() -> str | None:
 
 
 def _register_cjk(doc: fitz.Document) -> bool:
+    """CJK 폰트 사용 가능 여부. 실제 등록은 페이지별로 `_ensure_page_cjk`."""
     font = _find_cjk_font()
     if not font:
         return False
-    key = id(doc)
-    if key in _CJK_REGISTERED_DOCS:
-        return True
+    _CJK_REGISTERED_DOCS.add(id(doc))
+    return True
+
+
+def _ensure_page_cjk(page: fitz.Page) -> bool:
+    font = _find_cjk_font()
+    if not font:
+        return False
     try:
-        doc.insert_font(fontname="cjk", fontfile=font)
-        _CJK_REGISTERED_DOCS.add(key)
+        page.insert_font(fontname="cjk", fontfile=font)
         return True
-    except Exception as exc:
-        print(f"경고: CJK 폰트 등록 실패 ({font}): {exc}", flush=True)
+    except Exception:
         return False
 
 
 def _insert_cjk(page: fitz.Page, rect: fitz.Rect, text: str, fontsize: float) -> None:
     font = _find_cjk_font()
     if font:
+        _ensure_page_cjk(page)
         try:
             page.insert_textbox(
                 rect,
@@ -401,11 +430,21 @@ def find_cjk_font_path() -> str | None:
     return _find_cjk_font()
 
 
-def items_from_rows(rows: list[dict], root: Path) -> list[ComposeItem]:
+def items_from_rows(
+    rows: list[dict],
+    root: Path,
+    *,
+    require_image: bool = True,
+) -> list[ComposeItem]:
     try:
         from drive_images import resolve_image
     except ImportError:
         resolve_image = None  # type: ignore
+
+    try:
+        from normalize_class_code import answer_label_to_number
+    except ImportError:
+        answer_label_to_number = None  # type: ignore
 
     items: list[ComposeItem] = []
     for i, row in enumerate(rows, start=1):
@@ -413,17 +452,25 @@ def items_from_rows(rows: list[dict], root: Path) -> list[ComposeItem]:
         path: Path | None = None
         if resolve_image is not None:
             path = resolve_image(root, rel)
-        if path is None:
+        if path is None and rel:
             candidate = root / rel
             path = candidate if candidate.is_file() else None
-        if path is None or not path.is_file():
+        if require_image and (path is None or not path.is_file()):
             continue
+        raw_answer = str(row.get("정답", "") or "").strip()
+        if raw_answer.lower() == "nan":
+            raw_answer = ""
+        if answer_label_to_number is not None and raw_answer:
+            normalized = answer_label_to_number(raw_answer)
+            if normalized:
+                raw_answer = normalized
         items.append(
             ComposeItem(
-                image_path=path,
+                image_path=path if path is not None else Path(rel or ""),
                 new_number=i,
                 era=str(row.get("시대", "")),
                 achievement_code=str(row.get("성취기준_코드", "")),
+                answer=raw_answer,
                 answer_key=str(row.get("정답핵심요소", "")),
                 source_year=str(row.get("연도", "")),
                 source_exam_type=str(row.get("문형", "")),
@@ -444,9 +491,28 @@ def compose_to_files(
 ) -> tuple[Path, Path]:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir.mkdir(parents=True, exist_ok=True)
-    items = items_from_rows(rows, root)
+    exam_items = items_from_rows(rows, root, require_image=True)
+    # 정답지는 이미지 없어도 선지 번호·출처를 출력
+    answer_items = items_from_rows(rows, root, require_image=False)
+    # 새 번호는 바구니 순서를 따르되, 문제지에 실제로 실린 문항만 맞추려면
+    # 이미지 있는 행 기준으로 번호를 다시 매긴다.
+    present_uids = {
+        (it.source_year, it.source_exam_type, it.source_number, it.subject)
+        for it in exam_items
+    }
+    if exam_items:
+        renumbered: list[ComposeItem] = []
+        n = 0
+        for it in answer_items:
+            key = (it.source_year, it.source_exam_type, it.source_number, it.subject)
+            if key not in present_uids:
+                continue
+            n += 1
+            it.new_number = n
+            renumbered.append(it)
+        answer_items = renumbered or answer_items
     exam_path = out_dir / f"{stamp}_문제지.pdf"
     answer_path = out_dir / f"{stamp}_정답지.pdf"
-    build_exam_pdf(items, exam_path, title=title)
-    build_answer_pdf(items, answer_path, title=f"{title} — 정답")
+    build_exam_pdf(exam_items, exam_path, title=title)
+    build_answer_pdf(answer_items, answer_path, title=f"{title} — 정답")
     return exam_path, answer_path

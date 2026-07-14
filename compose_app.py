@@ -101,6 +101,20 @@ def _basket_uids() -> set[str]:
     return {str(r.get("uid")) for r in st.session_state.basket}
 
 
+def _answer_caption(row: dict | pd.Series) -> str:
+    mapping = {"1": "①", "2": "②", "3": "③", "4": "④", "5": "⑤"}
+    raw = str(row.get("정답", "") or "").strip()
+    label = mapping.get(raw, raw if raw in mapping.values() else "")
+    key = str(row.get("정답핵심요소", "") or "").strip()
+    if label and key:
+        return f"정답: {label} · {key[:80]}"
+    if label:
+        return f"정답: {label}"
+    if key:
+        return f"정답: {key[:80]}"
+    return "정답: —"
+
+
 def _add_to_basket(rows: list[dict]) -> int:
     existing = _basket_uids()
     added = 0
@@ -269,13 +283,12 @@ def main() -> None:
                 uid = str(row["uid"])
                 already = uid in in_basket
                 source_key = str(row.get("자료핵심요소", "") or "")
-                answer_key = str(row.get("정답핵심요소", "") or "")
                 with st.container(border=True):
                     st.markdown(
                         f"**{row['프로파일라벨']}** · {row['연도']} · {row['문형']} #{row['문항번호']}  \n"
                         f"`{row['성취기준_코드']}` · {row['시대']} · {row['문제형식']}  \n"
                         f"자료: {source_key[:80]}  \n"
-                        f"정답: {answer_key[:80]}"
+                        f"{_answer_caption(row)}"
                     )
                     show_prev = st.toggle("미리보기", key=f"prev_{uid}", value=False)
                     if show_prev:
@@ -355,7 +368,7 @@ def main() -> None:
                     f"{row.get('문형', '')} #{row.get('문항번호', '')} · {row.get('시대', '')}"
                 )
                 st.caption(f"자료: {str(row.get('자료핵심요소', '') or '')[:80]}")
-                st.caption(f"정답: {str(row.get('정답핵심요소', '') or '')[:80]}")
+                st.caption(_answer_caption(row))
                 a, b, c = st.columns(3)
                 with a:
                     if st.button("▲", key=f"up_{uid}"):

@@ -16,6 +16,7 @@ from exam_profiles import (
     ensure_profile_dirs,
     get_profile,
 )
+from normalize_class_code import answer_label_to_number
 
 
 def project_root() -> Path:
@@ -100,6 +101,11 @@ def main() -> int:
     parser.add_argument("--format", dest="problem_format", required=True)
     parser.add_argument("--sub-format", required=True)
     parser.add_argument("--source-key", required=True, help="자료핵심요소")
+    parser.add_argument(
+        "--answer",
+        default="",
+        help="정답 선지 번호 1~5 (또는 ①~⑤)",
+    )
     parser.add_argument("--answer-key", required=True, help="정답핵심요소")
     parser.add_argument("--image", type=Path, required=True)
     parser.add_argument("--source-pdf", type=Path, required=True)
@@ -110,6 +116,11 @@ def main() -> int:
     root = args.root or project_root()
     image = resolve_path(args.image, root)
     source_pdf = resolve_path(args.source_pdf, root)
+
+    answer = answer_label_to_number(str(args.answer)) if args.answer else ""
+    if args.answer and answer not in {"1", "2", "3", "4", "5"}:
+        print(f"오류: --answer는 1~5 또는 ①~⑤여야 함 (입력: {args.answer})", file=sys.stderr)
+        return 1
 
     row = {
         "연도": args.year,
@@ -122,6 +133,7 @@ def main() -> int:
         "문제형식": args.problem_format,
         "세부형식": args.sub_format,
         "자료핵심요소": args.source_key,
+        "정답": answer,
         "정답핵심요소": args.answer_key,
         "이미지경로": image.relative_to(root).as_posix() if image.is_relative_to(root) else str(args.image),
         "원본PDF": source_pdf.relative_to(root).as_posix() if source_pdf.is_relative_to(root) else str(args.source_pdf),
