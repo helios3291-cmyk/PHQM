@@ -138,6 +138,14 @@ python .cursor/skills/history-exam-analyst/scripts/index_achievement.py
    ```
    이미지만 재생성: `--crop-only`. CSV는 원자 쓰기(잠금 시 실패).
 
+   **정답 백필** (기존 CSV에 `정답` 채우기):
+   ```bash
+   # 기초학력 ← 내용분류표
+   python .cursor/skills/history-exam-analyst/scripts/backfill_basic_from_classification.py
+   # 모평·한능검 ← input/answers
+   python .cursor/skills/history-exam-analyst/scripts/backfill_answers_from_input.py
+   ```
+
 9. **검증**:
    ```bash
    python .cursor/skills/history-exam-analyst/scripts/validate_output.py --profile basic
