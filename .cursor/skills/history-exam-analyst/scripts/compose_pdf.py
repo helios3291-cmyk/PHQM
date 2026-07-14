@@ -336,7 +336,6 @@ def build_answer_pdf(
 
 
 _CJK_FONT: str | None = None
-_CJK_REGISTERED_DOCS: set[int] = set()
 _CJK_MISSING_WARNED = False
 
 
@@ -377,28 +376,49 @@ def _find_cjk_font() -> str | None:
 
 
 def _register_cjk(doc: fitz.Document) -> bool:
-    """CJK 폰트 사용 가능 여부. 실제 등록은 페이지별로 `_ensure_page_cjk`."""
-    font = _find_cjk_font()
-    if not font:
-        return False
-    _CJK_REGISTERED_DOCS.add(id(doc))
-    return True
+    """CJK 폰트 파일 존재 여부. Document.insert_font는 PyMuPDF 1.28+에서 제거됨."""
+    return bool(_find_cjk_font())
 
 
 def _ensure_page_cjk(page: fitz.Page) -> bool:
+    """페이지에 CJK 폰트 등록 (가능하면). 실패해도 fontfile= 경로로 그릴 수 있음."""
     font = _find_cjk_font()
     if not font:
         return False
     try:
+        # PyMuPDF 1.28+: Page.insert_font
         page.insert_font(fontname="cjk", fontfile=font)
         return True
     except Exception:
-        return False
+        pass
+    try:
+        # 구버전: Document.insert_font
+        doc = page.parent
+        if doc is not None and hasattr(doc, "insert_font"):
+            doc.insert_font(fontname="cjk", fontfile=font)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _insert_cjk(page: fitz.Page, rect: fitz.Rect, text: str, fontsize: float) -> None:
     font = _find_cjk_font()
     if font:
+        # 1) fontfile 직접 지정 — insert_font API에 의존하지 않음 (Cloud/최신 PyMuPDF 안전)
+        try:
+            page.insert_textbox(
+                rect,
+                text,
+                fontsize=fontsize,
+                fontfile=font,
+                fontname="nanum",
+                align=fitz.TEXT_ALIGN_LEFT,
+            )
+            return
+        except Exception:
+            pass
+        # 2) 페이지/문서에 등록 후 fontname="cjk"
         _ensure_page_cjk(page)
         try:
             page.insert_textbox(
@@ -410,18 +430,7 @@ def _insert_cjk(page: fitz.Page, rect: fitz.Rect, text: str, fontsize: float) ->
             )
             return
         except Exception:
-            try:
-                page.insert_textbox(
-                    rect,
-                    text,
-                    fontsize=fontsize,
-                    fontfile=font,
-                    fontname="cjk",
-                    align=fitz.TEXT_ALIGN_LEFT,
-                )
-                return
-            except Exception:
-                pass
+            pass
     page.insert_textbox(rect, text, fontsize=fontsize, fontname="helv", align=fitz.TEXT_ALIGN_LEFT)
 
 
