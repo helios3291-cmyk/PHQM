@@ -115,3 +115,4 @@ token_uri = "https://oauth2.googleapis.com/token"
 - 기출 이미지는 교육·사적 용도로만 사용하고, 공개 저장소에 PNG를 올리지 마세요.
 - 서비스 계정 JSON·앱 비밀번호는 git에 커밋하지 마세요.
 - 첫 PDF 생성은 문항 수만큼 다운로드가 있어 시간이 걸릴 수 있습니다.
+- PDF 한글 제목/라벨용으로 `assets/fonts/NanumGothic.ttf`(Nanum Gothic, OFL)를 저장소에 포함합니다. Cloud에서도 시스템 폰트 없이 동작합니다.

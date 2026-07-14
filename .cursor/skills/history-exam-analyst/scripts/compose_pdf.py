@@ -313,17 +313,28 @@ def build_answer_pdf(
 
 _CJK_FONT: str | None = None
 _CJK_REGISTERED_DOCS: set[int] = set()
+_CJK_MISSING_WARNED = False
+
+
+def _project_root() -> Path:
+    """scripts → history-exam-analyst → skills → .cursor → repo root"""
+    return Path(__file__).resolve().parents[4]
 
 
 def _find_cjk_font() -> str | None:
-    global _CJK_FONT
+    """저장소 번들 폰트 우선 (Streamlit Cloud에 시스템 한글 폰트 없음)."""
+    global _CJK_FONT, _CJK_MISSING_WARNED
     if _CJK_FONT is not None:
         return _CJK_FONT or None
+    root = _project_root()
     candidates = [
+        root / "assets" / "fonts" / "NanumGothic.ttf",
+        root / "assets" / "fonts" / "NanumGothic-Regular.ttf",
         Path(r"C:\Windows\Fonts\malgun.ttf"),
         Path(r"C:\Windows\Fonts\malgunbd.ttf"),
         Path(r"C:\Windows\Fonts\NanumGothic.ttf"),
         Path("/usr/share/fonts/truetype/nanum/NanumGothic.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
         Path("/System/Library/Fonts/AppleSDGothicNeo.ttc"),
     ]
     for p in candidates:
@@ -331,6 +342,13 @@ def _find_cjk_font() -> str | None:
             _CJK_FONT = str(p)
             return _CJK_FONT
     _CJK_FONT = ""
+    if not _CJK_MISSING_WARNED:
+        _CJK_MISSING_WARNED = True
+        print(
+            "경고: 한글 폰트 없음 — PDF 제목/라벨이 깨질 수 있습니다. "
+            "assets/fonts/NanumGothic.ttf 를 저장소에 두세요.",
+            flush=True,
+        )
     return None
 
 
@@ -345,32 +363,42 @@ def _register_cjk(doc: fitz.Document) -> bool:
         doc.insert_font(fontname="cjk", fontfile=font)
         _CJK_REGISTERED_DOCS.add(key)
         return True
-    except Exception:
+    except Exception as exc:
+        print(f"경고: CJK 폰트 등록 실패 ({font}): {exc}", flush=True)
         return False
 
 
 def _insert_cjk(page: fitz.Page, rect: fitz.Rect, text: str, fontsize: float) -> None:
-    try:
-        page.insert_textbox(
-            rect,
-            text,
-            fontsize=fontsize,
-            fontname="cjk",
-            align=fitz.TEXT_ALIGN_LEFT,
-        )
-    except Exception:
-        font = _find_cjk_font()
-        if font:
+    font = _find_cjk_font()
+    if font:
+        try:
             page.insert_textbox(
                 rect,
                 text,
                 fontsize=fontsize,
-                fontfile=font,
                 fontname="cjk",
                 align=fitz.TEXT_ALIGN_LEFT,
             )
-        else:
-            page.insert_textbox(rect, text, fontsize=fontsize, fontname="helv", align=fitz.TEXT_ALIGN_LEFT)
+            return
+        except Exception:
+            try:
+                page.insert_textbox(
+                    rect,
+                    text,
+                    fontsize=fontsize,
+                    fontfile=font,
+                    fontname="cjk",
+                    align=fitz.TEXT_ALIGN_LEFT,
+                )
+                return
+            except Exception:
+                pass
+    page.insert_textbox(rect, text, fontsize=fontsize, fontname="helv", align=fitz.TEXT_ALIGN_LEFT)
+
+
+def find_cjk_font_path() -> str | None:
+    """UI/진단용: 현재 선택된 CJK 폰트 경로."""
+    return _find_cjk_font()
 
 
 def items_from_rows(rows: list[dict], root: Path) -> list[ComposeItem]:
