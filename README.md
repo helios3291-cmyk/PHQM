@@ -2,6 +2,8 @@
 
 고등학교 역사 기출문제 PDF를 분석하여 메타데이터를 CSV로 저장하고, 문항 이미지를 PNG로 크롭하는 Cursor 프로젝트 에이전트입니다.
 
+**Windows 로컬 작업 폴더(`E:\HisPastExamAnalysist` 등) 초기 설정:** [LOCAL_SETUP.md](LOCAL_SETUP.md)
+
 ## 폴더 구조
 
 ```
@@ -24,7 +26,7 @@ HisPastExamAnalysist/
 ### 1. Python 패키지
 
 ```powershell
-cd c:\HisPastExamAnalysist
+cd E:\HisPastExamAnalysist
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
