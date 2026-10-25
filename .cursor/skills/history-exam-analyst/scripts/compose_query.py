@@ -18,6 +18,7 @@ ERAS = (
     "개항기",
     "일제강점기",
     "현대",
+    "통사",
 )
 
 PROFILE_LABELS = {pid: PROFILES[pid]["label"] for pid in PROFILE_IDS}

@@ -28,6 +28,7 @@ VALID_ERAS = {
     "개항기",
     "일제강점기",
     "현대",
+    "통사",
 }
 
 VALID_PROBLEM_FORMATS = {
