@@ -97,13 +97,11 @@ def normalize_class_code(raw: str) -> str | None:
     if m:
         return f"10한사{m.group(1)}-{m.group(2)}-{m.group(3)}"
 
+    # 고2 진단 내용분류표의 2015 개정 고등 코드는 원문 그대로 둔다.
+    # (2022 개정과 단원 구성이 달라 글자만 바꾸면 내용이 어긋남)
     m = G2_PATTERN.fullmatch(raw) or G2_PATTERN.match(raw)
     if m:
-        unit, sub = m.group(1), m.group(2)
-        unit_int = int(unit)
-        course = "1" if unit_int <= 2 else "2"
-        mid = unit if unit_int <= 2 else f"{unit_int - 2:02d}"
-        return f"10한사{course}-{mid}-{sub}"
+        return f"10한사{m.group(1)}-{m.group(2)}"
 
     return None
 

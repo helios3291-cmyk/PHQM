@@ -25,9 +25,12 @@ QUESTION_NUM_RE = re.compile(r"^\d{1,2}$")
 HEADER_SKIP = re.compile(
     r"내용분류표|문항\s*번호|^번호$|^문항$|성취기준|평가요소|내용\s*영역|^정답$|"
     r"^역사$|^지식$|^이해$|^자료$|^분석$|^결론$|^도출$|^문제$|^해결$|합계|"
-    r"기초학력|향상도|최소한|준거|고등학교|한국사|역사Ⅰ|역사2|"
+    r"기초학력|향상도|최소한|준거|고등학교|한국사|역사Ⅰ|역사2|역사②|"
     r"^\(?\d{4}\)?|검사|협의회|C\d+형|A형|B형|C형|가형|나형|공통"
 )
+G2_2015_CODE_RE = re.compile(r"^10한사0[1-4]-\d{2}$")
+# 같은 행의 셀이라도 문항 번호보다 몇 px 위에 놓일 수 있음 (2025 고1 가형: 1px)
+ROW_TOLERANCE = 5.0
 CONTENT_AREAS = ["역사지식", "역사이해", "자료분석", "결론도출", "문제해결"]
 AREA_X_CENTERS = [462, 502, 542, 583, 623]
 
@@ -255,9 +258,13 @@ def parse_question_block(
         return None
 
     achievement_code = normalize_class_code(achievement_code_raw)
-    achievement_code, achievement_text_index = verify_code(
-        achievement_code, evaluation_element, index, warnings, number, school_level
-    )
+    if achievement_code and G2_2015_CODE_RE.fullmatch(achievement_code):
+        # 고2 진단: 2015 고등 코드는 인덱스(2022)에 없으므로 대조·fuzzy 대체 없이 원문 유지
+        achievement_text_index = ""
+    else:
+        achievement_code, achievement_text_index = verify_code(
+            achievement_code, evaluation_element, index, warnings, number, school_level
+        )
 
     answer = answer_label_to_number(answer_label)
 
@@ -287,18 +294,25 @@ def parse_classification_pdf(pdf_path: Path, root: Path) -> dict:
     index = load_achievement_index(root)
     warnings: list[str] = []
 
-    anchors: list[tuple[int, int]] = []
-    for i, line in enumerate(lines):
-        num = is_question_anchor(line)
-        if num is not None:
-            anchors.append((i, num))
+    anchors = [line for line in lines if is_question_anchor(line) is not None]
+    # 페이지별 표 끝: '합계' 행부터는 어떤 문항에도 넣지 않음 (합계 숫자가 정답으로 읽히던 문제)
+    table_end: dict[int, float] = {}
+    for line in lines:
+        if line["text"].strip() == "합계":
+            table_end[line["page"]] = min(table_end.get(line["page"], 1e9), line["y0"])
 
     entries: list[dict] = []
-    for ai, (start_idx, _) in enumerate(anchors):
-        end_idx = anchors[ai + 1][0] if ai + 1 < len(anchors) else len(lines)
-        block = lines[start_idx:end_idx]
-        if block and block[-1]["text"].strip() == "합계":
-            block = block[:-1]
+    for ai, anchor in enumerate(anchors):
+        page = anchor["page"]
+        top = anchor["y0"] - ROW_TOLERANCE
+        nxt = anchors[ai + 1] if ai + 1 < len(anchors) else None
+        bottom = nxt["y0"] - ROW_TOLERANCE if nxt and nxt["page"] == page else 1e9
+        bottom = min(bottom, table_end.get(page, 1e9) - ROW_TOLERANCE)
+        # 행 단위(y 구간)로 모으고, 문항 번호를 맨 앞에 둔다
+        block = [anchor] + [
+            l for l in lines
+            if l is not anchor and l["page"] == page and top <= l["y0"] < bottom
+        ]
         entry = parse_question_block(block, exam_format, index, warnings, school_level)
         if entry:
             entries.append(entry)
