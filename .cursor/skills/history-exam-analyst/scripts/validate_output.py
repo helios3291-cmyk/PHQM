@@ -65,8 +65,22 @@ HIGH_2015_CODE_RE = re.compile(r"^10한사0[1-4]-\d{2}$")
 MIDDLE_CODE_RE = re.compile(r"^9역\d{2}-\d{2}$")
 
 
+def load_classification_entries(root: Path, pdf_name: str, cache: dict) -> dict | None:
+    """원본PDF(검사지)에 대응하는 output/work/<stem>/classification.json 항목 {문항번호: entry}."""
+    stem = Path(pdf_name.replace("\\", "/")).stem
+    if stem not in cache:
+        path = root / "output" / "work" / stem / "classification.json"
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            cache[stem] = {str(e["number"]): e for e in data.get("entries", [])}
+        else:
+            cache[stem] = None
+    return cache[stem]
+
+
 def validate_profile(root: Path, profile_id: str, *, strict: bool = False) -> list[str]:
     errors: list[str] = []
+    classification_cache: dict = {}
     profile = get_profile(profile_id)
     csv_file = csv_path_for(profile_id, root)
     images_prefix = profile["images_dir"].replace("\\", "/") + "/"
@@ -166,6 +180,22 @@ def validate_profile(root: Path, profile_id: str, *, strict: bool = False) -> li
                 elif not (grade == "고1" and subject == "역사"):
                     if code and not HIGH_CODE_RE.fullmatch(code):
                         errors.append(f"[{profile_id}] 행 {row_num}: 고등 성취기준_코드 형식 오류 — {code}")
+            # 기초학력 정답·성취기준은 내용분류표 원문이 기준 → classification.json과 일치해야 함
+            entries = load_classification_entries(root, pdf_name, classification_cache)
+            num = str(row.get("문항번호", "")).strip()
+            if entries is None:
+                if strict:
+                    errors.append(f"[{profile_id}] 행 {row_num}: 내용분류표 classification.json 없음 — {pdf_name}")
+            elif num not in entries:
+                errors.append(f"[{profile_id}] 행 {row_num}: 내용분류표에 {num}번 문항 없음")
+            else:
+                cls = entries[num]
+                cls_answer = str(cls.get("answer", "") or "").strip()
+                if cls_answer and answer != cls_answer:
+                    errors.append(f"[{profile_id}] 행 {row_num}: 정답 {answer}이(가) 내용분류표 정답 {cls_answer}과 다름")
+                cls_code = str(cls.get("achievement_code", "") or "").strip()
+                if cls_code and code != cls_code:
+                    errors.append(f"[{profile_id}] 행 {row_num}: 성취기준_코드 {code}이(가) 내용분류표 {cls_code}와 다름")
         elif profile_id == "mock" and "high_10hans" in validators:
             if code and not HIGH_CODE_RE.fullmatch(code):
                 errors.append(f"[{profile_id}] 행 {row_num}: 성취기준_코드 형식 오류 — {code}")

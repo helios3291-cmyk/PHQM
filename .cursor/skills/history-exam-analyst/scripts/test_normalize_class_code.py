@@ -7,10 +7,11 @@ from normalize_class_code import normalize_class_code, strip_code_brackets
 
 
 def test_high_from_table() -> None:
-    assert normalize_class_code("10한사01-01") == "10한사1-01-01"
-    assert normalize_class_code("10한사02-04") == "10한사1-02-04"
-    assert normalize_class_code("10한사03-04") == "10한사2-01-04"
-    assert normalize_class_code("10한사04-01") == "10한사2-02-01"
+    # 고2 진단 분류표의 2015 고등 코드는 원문 그대로 유지 (2022 형식 변환 금지)
+    assert normalize_class_code("10한사01-01") == "10한사01-01"
+    assert normalize_class_code("10한사02-04") == "10한사02-04"
+    assert normalize_class_code("[10한사03-04]") == "10한사03-04"
+    assert normalize_class_code("10한사04-08") == "10한사04-08"
 
 
 def test_canonical() -> None:

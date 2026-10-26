@@ -148,6 +148,9 @@ w(NOTES['followups'] + '\n')
 if 'applied' in NOTES:
     w('## 11. 적용 결과\n')
     w(NOTES['applied'] + '\n')
+if 'parser_fix' in NOTES:
+    w('## 12. 분류표 파서 수정\n')
+    w(NOTES['parser_fix'] + '\n')
 open('output/review/2026-10_기초학력_교차검증.md', 'w', encoding='utf-8').write('\n'.join(L))
 print('n', n, 'ans', len(ans_err), 'era_fix', len(era_fix), 'fmt_fix', len(fmt_fix), 'era_split', len(era_split),
       'fmt_split', len(fmt_split), 'key_fix', len(key_fix), 'kw', len(kw), 'unanimous_ok', unanimous_ok,
