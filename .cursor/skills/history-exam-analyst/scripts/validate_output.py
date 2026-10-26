@@ -60,6 +60,8 @@ def project_root() -> Path:
 
 EVAL_ELEMENT_SUFFIX = re.compile(r"(파악하기|이해하기|분석하기|설명하기|알기|탐구하기)$")
 HIGH_CODE_RE = re.compile(r"^10한사[12]-\d{2}-\d{2}$")
+# 고2 한국사 기초학력 진단: 내용분류표 원문의 2015 개정 고등 코드 (예: 10한사02-01)
+HIGH_2015_CODE_RE = re.compile(r"^10한사0[1-4]-\d{2}$")
 MIDDLE_CODE_RE = re.compile(r"^9역\d{2}-\d{2}$")
 
 
@@ -158,7 +160,10 @@ def validate_profile(root: Path, profile_id: str, *, strict: bool = False) -> li
                 if code and not MIDDLE_CODE_RE.fullmatch(code):
                     errors.append(f"[{profile_id}] 행 {row_num}: 고1 역사 성취기준_코드 형식 오류 — {code}")
             elif "high_10hans" in validators and grade.startswith("고"):
-                if not (grade == "고1" and subject == "역사"):
+                if grade == "고2":
+                    if code and not HIGH_2015_CODE_RE.fullmatch(code):
+                        errors.append(f"[{profile_id}] 행 {row_num}: 고2 진단 성취기준_코드는 분류표 원문(10한사0X-YY)이어야 함 — {code}")
+                elif not (grade == "고1" and subject == "역사"):
                     if code and not HIGH_CODE_RE.fullmatch(code):
                         errors.append(f"[{profile_id}] 행 {row_num}: 고등 성취기준_코드 형식 오류 — {code}")
         elif profile_id == "mock" and "high_10hans" in validators:

@@ -61,7 +61,7 @@ w('# 기초학력 진단·향상도 검사 교차검증 보고서\n')
 w(f'대상: `exam_basic.csv` 전체 {n}문항. 2024·2025 고1 역사 가/나형 120, 2024·2025 고2 한국사 가/나형 120, 2026 고1 한국사 향상도 A/B형 50.  ')
 w('방법: 리뷰어 5명(A~E)이 CSV를 보지 않고 크롭 이미지와 스킬 규칙 문서(`SKILL.md`·`problem-formats.md`·`schema.md`)만으로 시대·문제형식·세부형식·자료/정답 핵심요소·정답을 판독했습니다. '
   '시험지 10개 단위로 나눠 돌렸고, 원자료는 `output/review/basic_raw/<시험지>/A~E.json`, 문항별 비교는 같은 폴더의 `compare.json`에 있습니다. '
-  '시대·형식은 5명 중 4명 이상 일치하면 확정으로 봤습니다. 정답과 성취기준은 리뷰어 합의와 별도로 내용분류표 PDF 원문과 대조했습니다. **CSV는 아직 수정하지 않았습니다.**\n')
+  '시대·형식은 5명 중 4명 이상 일치하면 확정으로 봤습니다. 정답과 성취기준은 리뷰어 합의와 별도로 내용분류표 PDF 원문과 대조했습니다. ' + ('**사용자 결정에 따라 CSV에 반영했습니다(§11).**\n' if 'applied' in NOTES else '**CSV는 아직 수정하지 않았습니다.**\n'))
 
 w('## 1. 요약\n')
 w('| 항목 | 결과 |\n|---|---|')
@@ -145,6 +145,9 @@ w('## 9. 직접 확인한 표본\n')
 w(NOTES['spot_checks'] + '\n')
 w('## 10. 원인과 후속 조치 제안\n')
 w(NOTES['followups'] + '\n')
+if 'applied' in NOTES:
+    w('## 11. 적용 결과\n')
+    w(NOTES['applied'] + '\n')
 open('output/review/2026-10_기초학력_교차검증.md', 'w', encoding='utf-8').write('\n'.join(L))
 print('n', n, 'ans', len(ans_err), 'era_fix', len(era_fix), 'fmt_fix', len(fmt_fix), 'era_split', len(era_split),
       'fmt_split', len(fmt_split), 'key_fix', len(key_fix), 'kw', len(kw), 'unanimous_ok', unanimous_ok,
