@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ PROFILES: dict[str, dict[str, Any]] = {
     "basic": {
         "id": "basic",
         "label": "기초학력",
+        # 조합 시험지 앱에서 숨김 (데이터·파이프라인은 유지). 다시 켜려면 True.
+        "compose_enabled": False,
         "csv": "output/data/exam_basic.csv",
         "images_dir": "output/images/basic",
         "achievement": "classification_or_index",
@@ -23,6 +26,7 @@ PROFILES: dict[str, dict[str, Any]] = {
     "mock": {
         "id": "mock",
         "label": "모의고사",
+        "compose_enabled": True,
         "csv": "output/data/exam_mock.csv",
         "images_dir": "output/images/mock",
         "achievement": "curriculum_index_ai",
@@ -32,6 +36,7 @@ PROFILES: dict[str, dict[str, Any]] = {
     "hancert": {
         "id": "hancert",
         "label": "한국사능력검정시험",
+        "compose_enabled": True,
         "csv": "output/data/exam_hancert.csv",
         "images_dir": "output/images/hancert",
         "achievement": "hancert_or_none",
@@ -57,6 +62,19 @@ CSV_COLUMNS = [
     "원본PDF",
     "처리일시",
 ]
+
+
+def compose_enabled_profiles() -> tuple[str, ...]:
+    """조합 시험지 앱에 노출할 프로파일.
+
+    기본값은 각 프로파일의 ``compose_enabled``.
+    환경변수 ``COMPOSE_ENABLED_PROFILES`` (예: ``basic,mock,hancert``)가 있으면 그것을 우선한다.
+    """
+    override = os.environ.get("COMPOSE_ENABLED_PROFILES", "").strip()
+    if override:
+        wanted = {p.strip().lower() for p in override.split(",") if p.strip()}
+        return tuple(pid for pid in PROFILE_IDS if pid in wanted)
+    return tuple(pid for pid in PROFILE_IDS if PROFILES[pid].get("compose_enabled", True))
 
 
 def get_profile(profile_id: str) -> dict[str, Any]:

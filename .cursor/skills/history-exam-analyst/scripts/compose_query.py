@@ -7,7 +7,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from exam_profiles import PROFILE_IDS, PROFILES, CSV_COLUMNS, csv_path_for
+from exam_profiles import (
+    CSV_COLUMNS,
+    PROFILE_IDS,
+    PROFILES,
+    compose_enabled_profiles,
+    csv_path_for,
+)
 
 ERAS = (
     "삼국시대 이전",
@@ -42,10 +48,16 @@ def question_uid(row: pd.Series | dict) -> str:
     )
 
 
-def load_all_questions(root: Path | None = None) -> pd.DataFrame:
+def load_all_questions(
+    root: Path | None = None, profiles: tuple[str, ...] | list[str] | None = None
+) -> pd.DataFrame:
+    """프로파일별 CSV 병합. ``profiles`` 미지정 시 조합 앱 활성 프로파일만 (기초학력 기본 제외)."""
     root = root or project_root()
+    selected = tuple(profiles) if profiles is not None else compose_enabled_profiles()
     frames: list[pd.DataFrame] = []
     for pid in PROFILE_IDS:
+        if pid not in selected:
+            continue
         path = csv_path_for(pid, root)
         if not path.exists() or path.stat().st_size == 0:
             continue

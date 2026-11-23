@@ -35,7 +35,7 @@ from compose_query import (  # noqa: E402
     load_all_questions,
     question_uid,
 )
-from exam_profiles import PROFILE_IDS  # noqa: E402
+from exam_profiles import compose_enabled_profiles  # noqa: E402
 
 try:
     from drive_images import (  # noqa: E402
@@ -179,7 +179,7 @@ def main() -> None:
 
     with st.sidebar:
         st.header("필터")
-        profile_options = {PROFILE_LABELS[p]: p for p in PROFILE_IDS}
+        profile_options = {PROFILE_LABELS[p]: p for p in compose_enabled_profiles()}
         selected_labels = st.multiselect(
             "프로파일",
             options=list(profile_options.keys()),
