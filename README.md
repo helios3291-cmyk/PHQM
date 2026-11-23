@@ -93,6 +93,9 @@ pip install -r requirements-compose.txt
 
 기본 배치는 페이지당 4문항(2단×2), 문항 높이에 따라 3·2문항으로 자동 조정됩니다.
 
+**기초학력 문항 비활성화:** 조합 앱은 현재 기초학력(`exam_basic.csv`) 문항을 불러오지 않습니다. CSV·이미지·분석 파이프라인은 그대로입니다.
+다시 켜려면 `exam_profiles.py`에서 `basic`의 `compose_enabled`를 `True`로 바꾸거나, 환경변수(또는 Streamlit Cloud secrets 최상위 키) `COMPOSE_ENABLED_PROFILES="basic,mock,hancert"`를 설정하세요.
+
 ## 수동 스크립트 사용
 
 ### PDF 전처리
