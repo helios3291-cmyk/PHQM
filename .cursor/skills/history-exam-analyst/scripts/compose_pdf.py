@@ -38,7 +38,7 @@ class ComposeItem:
 
 
 def _item_source_bracket(item: ComposeItem) -> str:
-    """예: [모의고사 · 2025(2026) · 6월모평 #12]"""
+    """예: [수능 및 모의고사 · 2025(2026) · 6월모평 #12]"""
     parts = [
         p
         for p in (item.profile_label, item.source_year, item.source_exam_type)

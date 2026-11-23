@@ -25,7 +25,7 @@ PROFILES: dict[str, dict[str, Any]] = {
     },
     "mock": {
         "id": "mock",
-        "label": "모의고사",
+        "label": "수능 및 모의고사",
         "compose_enabled": True,
         "csv": "output/data/exam_mock.csv",
         "images_dir": "output/images/mock",
